@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+.venv/
+.venv-ai/
+*.log
+*.tmp
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.wav
+*.m4a
+jobs/

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mizo Dub Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>Mizo Dub Studio</h1>
+          <div class="subline">
+            <span id="ffmpegStatus" class="status-dot pending"></span>
+            <span id="toolStatusText">Checking local tools</span>
+          </div>
+        </div>
+        <button id="refreshToolsBtn" class="ghost-button">Refresh</button>
+      </header>
+
+      <main class="workspace">
+        <section class="panel input-panel">
+          <div class="panel-head">
+            <h2>Video</h2>
+            <span id="videoMeta" class="muted">No file selected</span>
+          </div>
+          <div class="drop-zone">
+            <video id="videoPreview" controls></video>
+            <button id="selectVideoBtn" class="primary-button">Choose video</button>
+          </div>
+          <div class="button-row">
+            <button id="extractAudioBtn" disabled>Extract audio</button>
+            <button id="transcribeBtn" disabled>Transcribe</button>
+          </div>
+        </section>
+
+        <section class="panel script-panel">
+          <div class="panel-head">
+            <h2>Source transcript</h2>
+            <select id="sourceLanguageSelect">
+              <option value="auto">Auto</option>
+              <option value="eng_Latn">English</option>
+              <option value="zho_Hans">Chinese</option>
+            </select>
+          </div>
+          <textarea id="transcriptText" spellcheck="true" placeholder="Paste transcript here, or run local transcription after extracting audio."></textarea>
+          <div class="button-row">
+            <select id="whisperModelSelect">
+              <option value="small">Whisper small</option>
+              <option value="medium">Whisper medium</option>
+              <option value="large-v3">Whisper large-v3</option>
+            </select>
+            <button id="translateBtn">Translate draft</button>
+          </div>
+        </section>
+
+        <section class="panel script-panel">
+          <div class="panel-head">
+            <h2>Mizo script</h2>
+            <span id="scriptStats" class="muted">0 words</span>
+          </div>
+          <textarea id="mizoText" spellcheck="true" placeholder="Edit the final Mizo narration script here."></textarea>
+          <div class="button-row">
+            <button id="ttsBtn">Try Mizo TTS</button>
+            <button id="clearMizoBtn" class="ghost-button">Clear</button>
+          </div>
+        </section>
+
+        <section class="panel voice-panel">
+          <div class="panel-head">
+            <h2>Voice</h2>
+            <span id="voiceMeta" class="muted">No Mizo voice audio</span>
+          </div>
+          <div class="recording-meter">
+            <div id="recordPulse" class="record-pulse"></div>
+            <span id="recordingTime">00:00</span>
+          </div>
+          <div class="button-row">
+            <button id="recordBtn" disabled>Record</button>
+            <button id="stopRecordBtn" disabled>Stop</button>
+            <button id="importAudioBtn" disabled>Import audio</button>
+          </div>
+          <audio id="voicePreview" controls></audio>
+        </section>
+
+        <section class="panel progress-panel">
+          <div class="panel-head">
+            <h2>Progress</h2>
+            <span id="currentStep" class="muted">Idle</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progressFill"></div>
+          </div>
+          <div class="step-grid">
+            <div class="step-pill" data-step="extract">Extract</div>
+            <div class="step-pill" data-step="transcribe">Transcribe</div>
+            <div class="step-pill" data-step="translate">Translate</div>
+            <div class="step-pill" data-step="voice">Voice</div>
+            <div class="step-pill" data-step="tts">TTS</div>
+            <div class="step-pill" data-step="export">Export</div>
+          </div>
+          <pre id="logOutput"></pre>
+        </section>
+
+        <section class="panel export-panel">
+          <div class="panel-head">
+            <h2>Export</h2>
+            <span id="exportMeta" class="muted">MP4 output</span>
+          </div>
+          <div class="export-actions">
+            <button id="exportBtn" class="primary-button" disabled>Export dubbed video</button>
+            <button id="showOutputBtn" disabled>Show output</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
