@@ -11,10 +11,14 @@ const els = {
   transcriptText: document.querySelector("#transcriptText"),
   whisperModelSelect: document.querySelector("#whisperModelSelect"),
   translateBtn: document.querySelector("#translateBtn"),
+  targetLanguageSelect: document.querySelector("#targetLanguageSelect"),
   mizoText: document.querySelector("#mizoText"),
   scriptStats: document.querySelector("#scriptStats"),
   ttsBtn: document.querySelector("#ttsBtn"),
+  timedTtsBtn: document.querySelector("#timedTtsBtn"),
   clearMizoBtn: document.querySelector("#clearMizoBtn"),
+  segmentMeta: document.querySelector("#segmentMeta"),
+  segmentsList: document.querySelector("#segmentsList"),
   voiceMeta: document.querySelector("#voiceMeta"),
   recordPulse: document.querySelector("#recordPulse"),
   recordingTime: document.querySelector("#recordingTime"),
@@ -36,11 +40,19 @@ const state = {
   extractedAudioPath: null,
   voiceAudioPath: null,
   outputPath: null,
+  segments: [],
   mediaRecorder: null,
   mediaStream: null,
   recordingChunks: [],
   recordingStartedAt: 0,
   recordingTimer: null
+};
+
+const languages = {
+  eng_Latn: { label: "English", whisper: "en" },
+  zho_Hans: { label: "Chinese", whisper: "zh" },
+  mya_Mymr: { label: "Myanmar", whisper: "my" },
+  lus_Latn: { label: "Mizo", whisper: null }
 };
 
 function formatBytes(bytes) {
@@ -64,17 +76,31 @@ function formatTime(totalSeconds) {
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
 }
 
+function formatTimestamp(value) {
+  const total = Math.max(0, Number(value) || 0);
+  const minutes = Math.floor(total / 60);
+  const seconds = Math.floor(total % 60);
+  const tenths = Math.floor((total - Math.floor(total)) * 10);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
+}
+
 function log(message) {
   const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   els.logOutput.textContent = `${stamp}  ${message}\n${els.logOutput.textContent}`.slice(0, 9000);
 }
 
+function targetLanguage() {
+  return els.targetLanguageSelect.value;
+}
+
 function setBusy(isBusy) {
+  const hasTimedTarget = state.segments.some((segment) => (segment.targetText || segment.text || "").trim());
   els.selectVideoBtn.disabled = isBusy;
   els.extractAudioBtn.disabled = isBusy || !state.video;
   els.transcribeBtn.disabled = isBusy || !state.extractedAudioPath;
   els.translateBtn.disabled = isBusy;
   els.ttsBtn.disabled = isBusy || !state.job || !els.mizoText.value.trim();
+  els.timedTtsBtn.disabled = isBusy || !state.job || !hasTimedTarget;
   els.recordBtn.disabled = isBusy || !state.job || Boolean(state.mediaRecorder);
   els.stopRecordBtn.disabled = !state.mediaRecorder;
   els.importAudioBtn.disabled = isBusy || !state.job;
@@ -83,8 +109,10 @@ function setBusy(isBusy) {
 }
 
 function updateScriptStats() {
-  const words = els.mizoText.value.trim().split(/\s+/).filter(Boolean).length;
-  els.scriptStats.textContent = `${words} word${words === 1 ? "" : "s"}`;
+  const text = els.mizoText.value.trim();
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const segmentCount = state.segments.length;
+  els.scriptStats.textContent = segmentCount > 0 ? `${words} words, ${segmentCount} timed` : `${words} words`;
   setBusy(false);
 }
 
@@ -107,21 +135,89 @@ function setProgress(payload) {
 
 function sourceLanguageForTranscription() {
   const selected = els.sourceLanguageSelect.value;
-  if (selected === "eng_Latn") {
-    return "en";
+  if (selected === "auto") {
+    return "auto";
   }
-  if (selected === "zho_Hans") {
-    return "zh";
-  }
-  return "auto";
+  return languages[selected]?.whisper || "auto";
 }
 
 function sourceLanguageForTranslation() {
   const selected = els.sourceLanguageSelect.value;
-  if (selected === "zho_Hans") {
-    return "zho_Hans";
+  return selected === "auto" ? "eng_Latn" : selected;
+}
+
+function normalizeSegments(segments) {
+  return (segments || [])
+    .map((segment, index) => ({
+      id: segment.id || `seg-${index}`,
+      start: Number(segment.start) || 0,
+      end: Number(segment.end) || Number(segment.start) || 0,
+      text: segment.text || "",
+      targetText: segment.targetText || segment.translation || ""
+    }))
+    .filter((segment) => segment.end > segment.start || segment.text.trim());
+}
+
+function transcriptFromSegments() {
+  return state.segments.map((segment) => segment.text).filter(Boolean).join("\n");
+}
+
+function targetTextFromSegments() {
+  return state.segments
+    .map((segment) => segment.targetText || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderSegments() {
+  els.segmentsList.textContent = "";
+
+  if (state.segments.length === 0) {
+    els.segmentMeta.textContent = "No timed transcript yet";
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Run transcription to get timestamped segments. Pasted plain text can still use single TTS or recording, but cannot auto-sync to scenes.";
+    els.segmentsList.append(empty);
+    updateScriptStats();
+    return;
   }
-  return "eng_Latn";
+
+  els.segmentMeta.textContent = `${state.segments.length} segments`;
+  const fragment = document.createDocumentFragment();
+  state.segments.forEach((segment, index) => {
+    const row = document.createElement("div");
+    row.className = "segment-row";
+
+    const time = document.createElement("div");
+    time.className = "segment-time";
+    time.textContent = `${formatTimestamp(segment.start)}\n${formatTimestamp(segment.end)}`;
+
+    const source = document.createElement("textarea");
+    source.className = "segment-text";
+    source.value = segment.text;
+    source.spellcheck = true;
+    source.addEventListener("input", () => {
+      state.segments[index].text = source.value;
+      els.transcriptText.value = transcriptFromSegments();
+    });
+
+    const target = document.createElement("textarea");
+    target.className = "segment-text";
+    target.value = segment.targetText || "";
+    target.placeholder = `${languages[targetLanguage()]?.label || "Target"} voice text`;
+    target.spellcheck = true;
+    target.addEventListener("input", () => {
+      state.segments[index].targetText = target.value;
+      els.mizoText.value = targetTextFromSegments();
+      updateScriptStats();
+    });
+
+    row.append(time, source, target);
+    fragment.append(row);
+  });
+
+  els.segmentsList.append(fragment);
+  updateScriptStats();
 }
 
 async function refreshTools() {
@@ -153,11 +249,15 @@ async function selectVideo() {
   state.extractedAudioPath = null;
   state.voiceAudioPath = null;
   state.outputPath = null;
+  state.segments = [];
   els.videoPreview.src = result.fileUrl;
   els.videoMeta.textContent = `${result.name}  ${formatBytes(result.size)}`;
-  els.voiceMeta.textContent = "No Mizo voice audio";
+  els.voiceMeta.textContent = "No voice audio";
   els.exportMeta.textContent = "MP4 output";
   els.voicePreview.removeAttribute("src");
+  els.transcriptText.value = "";
+  els.mizoText.value = "";
+  renderSegments();
   log(`Selected video: ${result.name}`);
   setBusy(false);
 }
@@ -194,10 +294,12 @@ async function transcribeAudio() {
       language: sourceLanguageForTranscription(),
       model: els.whisperModelSelect.value
     });
-    els.transcriptText.value = result.text || "";
-    log("Transcript loaded");
+    state.segments = normalizeSegments(result.segments);
+    els.transcriptText.value = result.text || transcriptFromSegments();
+    renderSegments();
+    log(`Transcript loaded with ${state.segments.length} timed segments`);
   } catch (error) {
-    log(`Transcription needs AI setup: ${error.message}`);
+    log(`Transcription needs AI setup or a supported model: ${error.message}`);
   } finally {
     setBusy(false);
   }
@@ -205,20 +307,34 @@ async function transcribeAudio() {
 
 async function translateDraft() {
   const text = els.transcriptText.value.trim();
-  if (!text) {
+  if (!text && state.segments.length === 0) {
     log("Transcript is empty");
     return;
   }
 
   setBusy(true);
   try {
-    const result = await window.dubBridge.translate({
-      text,
-      sourceLanguage: sourceLanguageForTranslation()
-    });
-    els.mizoText.value = result.text || "";
-    updateScriptStats();
-    log("Mizo draft loaded");
+    if (state.segments.length > 0) {
+      const result = await window.dubBridge.translateSegments({
+        segments: state.segments,
+        jobDir: state.job?.dir,
+        sourceLanguage: sourceLanguageForTranslation(),
+        targetLanguage: targetLanguage()
+      });
+      state.segments = normalizeSegments(result.segments);
+      els.mizoText.value = targetTextFromSegments();
+      renderSegments();
+      log(`${languages[targetLanguage()]?.label || "Target"} timed draft loaded`);
+    } else {
+      const result = await window.dubBridge.translate({
+        text,
+        sourceLanguage: sourceLanguageForTranslation(),
+        targetLanguage: targetLanguage()
+      });
+      els.mizoText.value = result.text || "";
+      updateScriptStats();
+      log(`${languages[targetLanguage()]?.label || "Target"} draft loaded`);
+    }
   } catch (error) {
     log(`Translation needs AI setup: ${error.message}`);
   } finally {
@@ -226,7 +342,7 @@ async function translateDraft() {
   }
 }
 
-async function tryMizoTts() {
+async function trySingleTts() {
   const text = els.mizoText.value.trim();
   if (!state.job || !text) {
     return;
@@ -236,14 +352,52 @@ async function tryMizoTts() {
   try {
     const result = await window.dubBridge.synthesizeMizo({
       text,
-      jobDir: state.job.dir
+      jobDir: state.job.dir,
+      language: targetLanguage()
     });
     state.voiceAudioPath = result.path;
     els.voicePreview.src = result.fileUrl;
     els.voiceMeta.textContent = result.name;
-    log("Mizo TTS audio ready");
+    log("Single TTS audio ready. Use timed AI voice for better scene sync.");
   } catch (error) {
-    log(`Mizo TTS unavailable: ${error.message}`);
+    log(`TTS unavailable: ${error.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function generateTimedAiVoice() {
+  if (!state.job || state.segments.length === 0) {
+    log("Timed voice needs a timestamped transcript first");
+    return;
+  }
+
+  const segments = state.segments
+    .map((segment) => ({
+      start: segment.start,
+      end: segment.end,
+      text: (segment.targetText || segment.text || "").trim()
+    }))
+    .filter((segment) => segment.text && segment.end > segment.start);
+
+  if (segments.length === 0) {
+    log("Timed segments do not have target voice text");
+    return;
+  }
+
+  setBusy(true);
+  try {
+    const result = await window.dubBridge.synthesizeSegments({
+      segments,
+      jobDir: state.job.dir,
+      language: targetLanguage()
+    });
+    state.voiceAudioPath = result.path;
+    els.voicePreview.src = result.fileUrl;
+    els.voiceMeta.textContent = `${result.name}  timed`;
+    log("Timed AI voice generated and aligned to transcript timestamps");
+  } catch (error) {
+    log(`Timed AI voice failed: ${error.message}`);
   } finally {
     setBusy(false);
   }
@@ -325,7 +479,7 @@ async function saveStoppedRecording() {
     });
     state.voiceAudioPath = result.path;
     els.voiceMeta.textContent = `${result.name}  ${formatTime(result.durationSeconds || 0)}`;
-    log("Recording saved and normalized");
+    log("Recording saved and normalized. Whole recordings are not scene-aligned unless you record to match the video.");
   } catch (error) {
     log(`Recording save failed: ${error.message}`);
   } finally {
@@ -377,9 +531,18 @@ async function exportVideo() {
   }
 }
 
-function clearMizo() {
+function clearTargetScript() {
   els.mizoText.value = "";
-  updateScriptStats();
+  for (const segment of state.segments) {
+    segment.targetText = "";
+  }
+  renderSegments();
+}
+
+function targetLanguageChanged() {
+  renderSegments();
+  const label = languages[targetLanguage()]?.label || "target";
+  log(`Target voice language set to ${label}`);
 }
 
 els.refreshToolsBtn.addEventListener("click", refreshTools);
@@ -387,15 +550,17 @@ els.selectVideoBtn.addEventListener("click", selectVideo);
 els.extractAudioBtn.addEventListener("click", extractAudio);
 els.transcribeBtn.addEventListener("click", transcribeAudio);
 els.translateBtn.addEventListener("click", translateDraft);
-els.ttsBtn.addEventListener("click", tryMizoTts);
-els.clearMizoBtn.addEventListener("click", clearMizo);
+els.ttsBtn.addEventListener("click", trySingleTts);
+els.timedTtsBtn.addEventListener("click", generateTimedAiVoice);
+els.clearMizoBtn.addEventListener("click", clearTargetScript);
 els.recordBtn.addEventListener("click", startRecording);
 els.stopRecordBtn.addEventListener("click", stopRecording);
 els.importAudioBtn.addEventListener("click", importAudio);
 els.exportBtn.addEventListener("click", exportVideo);
 els.showOutputBtn.addEventListener("click", () => window.dubBridge.showFile(state.outputPath));
 els.mizoText.addEventListener("input", updateScriptStats);
+els.targetLanguageSelect.addEventListener("change", targetLanguageChanged);
 
 window.dubBridge.onProgress(setProgress);
 refreshTools();
-updateScriptStats();
+renderSegments();

@@ -1,7 +1,13 @@
+# AFTER
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")
 
 
 def emit_progress(percent, message):
@@ -44,6 +50,7 @@ def main():
         str(audio_path),
         language=language,
         beam_size=5,
+        word_timestamps=True,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500}
     )
@@ -54,7 +61,16 @@ def main():
             {
                 "start": segment.start,
                 "end": segment.end,
-                "text": segment.text.strip()
+                "text": segment.text.strip(),
+                "words": [
+                    {
+                        "start": word.start,
+                        "end": word.end,
+                        "word": word.word,
+                        "probability": word.probability,
+                    }
+                    for word in (segment.words or [])
+                ]
             }
         )
         if info.duration:

@@ -8,7 +8,9 @@ contextBridge.exposeInMainWorld("dubBridge", {
   saveRecording: (payload) => ipcRenderer.invoke("recording:save", payload),
   transcribe: (payload) => ipcRenderer.invoke("ai:transcribe", payload),
   translate: (payload) => ipcRenderer.invoke("ai:translate", payload),
+  translateSegments: (payload) => ipcRenderer.invoke("ai:translateSegments", payload),
   synthesizeMizo: (payload) => ipcRenderer.invoke("ai:tts", payload),
+  synthesizeSegments: (payload) => ipcRenderer.invoke("ai:ttsSegments", payload),
   exportVideo: (payload) => ipcRenderer.invoke("video:export", payload),
   showFile: (filePath) => ipcRenderer.invoke("file:show", filePath),
   onProgress: (callback) => {

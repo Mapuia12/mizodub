@@ -1,6 +1,13 @@
+# AFTER
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")
 
 
 def emit_progress(percent, message):

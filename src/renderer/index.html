@@ -42,6 +42,7 @@
               <option value="auto">Auto</option>
               <option value="eng_Latn">English</option>
               <option value="zho_Hans">Chinese</option>
+              <option value="mya_Mymr">Myanmar</option>
             </select>
           </div>
           <textarea id="transcriptText" spellcheck="true" placeholder="Paste transcript here, or run local transcription after extracting audio."></textarea>
@@ -57,14 +58,29 @@
 
         <section class="panel script-panel">
           <div class="panel-head">
-            <h2>Mizo script</h2>
+            <h2>Dub script</h2>
             <span id="scriptStats" class="muted">0 words</span>
           </div>
-          <textarea id="mizoText" spellcheck="true" placeholder="Edit the final Mizo narration script here."></textarea>
+          <div class="button-row compact-row">
+            <select id="targetLanguageSelect">
+              <option value="lus_Latn">Mizo</option>
+              <option value="mya_Mymr">Myanmar</option>
+            </select>
+          </div>
+          <textarea id="mizoText" spellcheck="true" placeholder="Edit the final dubbed narration script here."></textarea>
           <div class="button-row">
-            <button id="ttsBtn">Try Mizo TTS</button>
+            <button id="ttsBtn">Try single TTS</button>
+            <button id="timedTtsBtn">Generate timed AI voice</button>
             <button id="clearMizoBtn" class="ghost-button">Clear</button>
           </div>
+        </section>
+
+        <section class="panel segments-panel">
+          <div class="panel-head">
+            <h2>Timed segments</h2>
+            <span id="segmentMeta" class="muted">No timed transcript yet</span>
+          </div>
+          <div id="segmentsList" class="segments-list"></div>
         </section>
 
         <section class="panel voice-panel">
@@ -98,6 +114,7 @@
             <div class="step-pill" data-step="translate">Translate</div>
             <div class="step-pill" data-step="voice">Voice</div>
             <div class="step-pill" data-step="tts">TTS</div>
+            <div class="step-pill" data-step="align">Align</div>
             <div class="step-pill" data-step="export">Export</div>
           </div>
           <pre id="logOutput"></pre>

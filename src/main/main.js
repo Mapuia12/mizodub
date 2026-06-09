@@ -5,6 +5,7 @@ const fs = require("fs/promises");
 
 const {
   checkTools,
+  composeTimedVoiceTrack,
   createJob,
   extractAudio,
   exportDubbedVideo,
@@ -92,7 +93,7 @@ ipcMain.handle("video:select", async () => {
 
 ipcMain.handle("audio:select", async (_event, jobDir) => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: "Select Mizo voice audio",
+    title: "Select voice audio",
     properties: ["openFile"],
     filters: [
       { name: "Audio files", extensions: ["wav", "mp3", "m4a", "aac", "webm", "ogg", "flac"] },
@@ -109,7 +110,7 @@ ipcMain.handle("audio:select", async (_event, jobDir) => {
     const normalized = await normalizeAudio({
       inputPath: filePath,
       jobDir,
-      name: "imported-mizo-voice",
+      name: "imported-voice",
       sendProgress
     });
     return asFileResult(normalized.path, { sourcePath: filePath });
@@ -158,7 +159,7 @@ ipcMain.handle("ai:transcribe", async (_event, { audioPath, language, model }) =
   return result;
 });
 
-ipcMain.handle("ai:translate", async (_event, { text, sourceLanguage, model }) => {
+ipcMain.handle("ai:translate", async (_event, { text, sourceLanguage, targetLanguage, model }) => {
   const projectRoot = path.resolve(__dirname, "../..");
   const tempDir = path.join(app.getPath("userData"), "tmp");
   await fs.mkdir(tempDir, { recursive: true });
@@ -174,6 +175,8 @@ ipcMain.handle("ai:translate", async (_event, { text, sourceLanguage, model }) =
       inputPath,
       "--source-language",
       sourceLanguage || "eng_Latn",
+      "--target-language",
+      targetLanguage || "lus_Latn",
       "--model",
       model || "facebook/nllb-200-distilled-600M",
       "--output",
@@ -184,20 +187,51 @@ ipcMain.handle("ai:translate", async (_event, { text, sourceLanguage, model }) =
   });
 });
 
-ipcMain.handle("ai:tts", async (_event, { text, jobDir, model }) => {
+ipcMain.handle("ai:translateSegments", async (_event, { segments, sourceLanguage, targetLanguage, jobDir, model }) => {
   const projectRoot = path.resolve(__dirname, "../..");
-  const inputPath = path.join(jobDir, "mizo-script.txt");
-  const outputPath = path.join(jobDir, "mizo-tts.wav");
+  const workDir = jobDir || path.join(app.getPath("userData"), "tmp");
+  await fs.mkdir(workDir, { recursive: true });
+  const inputPath = path.join(workDir, `segments-source-${Date.now()}.json`);
+  const outputPath = path.join(workDir, `segments-translated-${Date.now()}.json`);
+  await fs.writeFile(inputPath, JSON.stringify({ segments: segments || [] }, null, 2), "utf8");
+
+  return runPythonHelper({
+    projectRoot,
+    scriptName: "translate_segments.py",
+    args: [
+      "--input",
+      inputPath,
+      "--source-language",
+      sourceLanguage || "eng_Latn",
+      "--target-language",
+      targetLanguage || "lus_Latn",
+      "--model",
+      model || "facebook/nllb-200-distilled-600M",
+      "--output",
+      outputPath
+    ],
+    step: "translate",
+    sendProgress
+  });
+});
+
+ipcMain.handle("ai:tts", async (_event, { text, jobDir, language, model }) => {
+  const projectRoot = path.resolve(__dirname, "../..");
+  const safeLanguage = language || "lus_Latn";
+  const inputPath = path.join(jobDir, `${safeLanguage}-script.txt`);
+  const outputPath = path.join(jobDir, `${safeLanguage}-tts.wav`);
   await fs.writeFile(inputPath, text || "", "utf8");
 
   const result = await runPythonHelper({
     projectRoot,
-    scriptName: "tts_mizo.py",
+    scriptName: "tts_voice.py",
     args: [
       "--input",
       inputPath,
+      "--language",
+      safeLanguage,
       "--model",
-      model || "andrewbawitlung/SpeechT5-Mizo-Lus-v24.11.19",
+      model || "",
       "--output",
       outputPath
     ],
@@ -208,12 +242,48 @@ ipcMain.handle("ai:tts", async (_event, { text, jobDir, model }) => {
   const normalized = await normalizeAudio({
     inputPath: outputPath,
     jobDir,
-    name: "mizo-tts-normalized",
+    name: `${safeLanguage}-tts-normalized`,
     sendProgress
   });
 
   return asFileResult(normalized.path, {
     tts: result
+  });
+});
+
+ipcMain.handle("ai:ttsSegments", async (_event, { segments, jobDir, language, model }) => {
+  const projectRoot = path.resolve(__dirname, "../..");
+  const safeLanguage = language || "mya_Mymr";
+  const inputPath = path.join(jobDir, `${safeLanguage}-segments-input.json`);
+  const manifestPath = path.join(jobDir, `${safeLanguage}-tts-segments.json`);
+  const outputPath = path.join(jobDir, `${safeLanguage}-timed-voice.m4a`);
+  await fs.writeFile(inputPath, JSON.stringify({ segments: segments || [] }, null, 2), "utf8");
+
+  const tts = await runPythonHelper({
+    projectRoot,
+    scriptName: "tts_segments.py",
+    args: [
+      "--input",
+      inputPath,
+      "--language",
+      safeLanguage,
+      "--model",
+      model || "",
+      "--output",
+      manifestPath
+    ],
+    step: "tts",
+    sendProgress
+  });
+
+  const timed = await composeTimedVoiceTrack({
+    manifestPath,
+    outputPath,
+    sendProgress
+  });
+
+  return asFileResult(timed.outputPath, {
+    tts
   });
 });
 

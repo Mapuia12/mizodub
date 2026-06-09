@@ -4,6 +4,7 @@ const os = require("os");
 const path = require("path");
 
 const {
+  composeTimedVoiceTrack,
   createJob,
   extractAudio,
   exportDubbedVideo,
@@ -32,6 +33,9 @@ async function main() {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mizo-dub-smoke-"));
   const videoPath = path.join(tmp, "source.mp4");
   const voicePath = path.join(tmp, "voice.wav");
+  const voicePath2 = path.join(tmp, "voice2.wav");
+  const manifestPath = path.join(tmp, "timed-segments.json");
+  const timedVoicePath = path.join(tmp, "timed-voice.m4a");
   const outputPath = path.join(tmp, "dubbed.mp4");
   const progress = [];
   const sendProgress = (event) => progress.push(event);
@@ -74,8 +78,42 @@ async function main() {
     voicePath
   ]);
 
+  await run("ffmpeg", [
+    "-hide_banner",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=660:duration=1",
+    "-ar",
+    "48000",
+    "-ac",
+    "1",
+    "-c:a",
+    "pcm_s16le",
+    voicePath2
+  ]);
+
   const job = await createJob(tmp, videoPath);
   const extracted = await extractAudio({ videoPath, jobDir: job.dir, sendProgress });
+  await fs.writeFile(
+    manifestPath,
+    JSON.stringify(
+      {
+        segments: [
+          { start: 0, end: 0.9, audioPath: voicePath },
+          { start: 1.1, end: 1.9, audioPath: voicePath2 }
+        ]
+      },
+      null,
+      2
+    )
+  );
+  const timed = await composeTimedVoiceTrack({
+    manifestPath,
+    outputPath: timedVoicePath,
+    sendProgress
+  });
   const normalized = await normalizeAudio({
     inputPath: voicePath,
     jobDir: job.dir,
@@ -84,13 +122,14 @@ async function main() {
   });
   const exported = await exportDubbedVideo({
     videoPath,
-    audioPath: normalized.path,
+    audioPath: timed.outputPath,
     outputPath,
     sendProgress
   });
 
   const checks = await Promise.all([
     fs.stat(extracted.path),
+    fs.stat(timed.outputPath),
     fs.stat(normalized.path),
     fs.stat(exported.outputPath)
   ]);

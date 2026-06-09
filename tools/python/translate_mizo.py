@@ -1,10 +1,14 @@
+# AFTER
 import argparse
 import json
+import os
 import re
+import sys
 from pathlib import Path
 
-
-TARGET_LANGUAGE = "lus_Latn"
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # fix Mizo chars on Windows
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")     # 5 min; default 10 s is too short
 
 
 def emit_progress(percent, message):
@@ -37,6 +41,7 @@ def main():
     parser = argparse.ArgumentParser(description="Local NLLB translation helper for Mizo drafts.")
     parser.add_argument("--input", required=True)
     parser.add_argument("--source-language", default="eng_Latn")
+    parser.add_argument("--target-language", default="lus_Latn")
     parser.add_argument("--model", default="facebook/nllb-200-distilled-600M")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
@@ -61,9 +66,9 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model, src_lang=args.source_language)
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model)
 
-    forced_bos_token_id = tokenizer.convert_tokens_to_ids(TARGET_LANGUAGE)
-    if forced_bos_token_id is None:
-        fail("The selected model does not expose the Mizo NLLB language token lus_Latn")
+    forced_bos_token_id = tokenizer.convert_tokens_to_ids(args.target_language)
+    if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
+        fail(f"The selected model does not expose the NLLB language token {args.target_language}")
 
     chunks = chunk_text(text)
     translated_chunks = []
@@ -85,7 +90,7 @@ def main():
     payload = {
         "ok": True,
         "source_language": args.source_language,
-        "target_language": TARGET_LANGUAGE,
+        "target_language": args.target_language,
         "model": args.model,
         "text": output_text
     }

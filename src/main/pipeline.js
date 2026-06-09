@@ -294,6 +294,114 @@ async function exportDubbedVideo({ videoPath, audioPath, outputPath, sendProgres
   return { outputPath };
 }
 
+function atempoChain(inputDuration, targetDuration) {
+  if (!inputDuration || !targetDuration || inputDuration <= 0 || targetDuration <= 0) {
+    return [];
+  }
+
+  let tempo = inputDuration / targetDuration;
+  if (Math.abs(tempo - 1) < 0.04) {
+    return [];
+  }
+
+  const filters = [];
+  while (tempo > 2) {
+    filters.push("atempo=2");
+    tempo /= 2;
+  }
+  while (tempo < 0.5) {
+    filters.push("atempo=0.5");
+    tempo /= 0.5;
+  }
+  filters.push(`atempo=${tempo.toFixed(3)}`);
+  return filters;
+}
+
+function seconds(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function composeTimedVoiceTrack({ manifestPath, outputPath, sendProgress }) {
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const rawSegments = Array.isArray(manifest.segments) ? manifest.segments : [];
+  const segments = rawSegments
+    .map((segment, index) => ({
+      ...segment,
+      index,
+      audioPath: segment.audioPath || segment.path,
+      start: Math.max(0, seconds(segment.start)),
+      end: Math.max(0, seconds(segment.end))
+    }))
+    .filter((segment) => segment.audioPath && segment.end > segment.start);
+
+  if (segments.length === 0) {
+    throw new Error("No timed TTS segments were generated");
+  }
+
+  const inputs = [];
+  const filters = [];
+  const labels = [];
+
+  sendProgress({
+    step: "align",
+    state: "running",
+    percent: 5,
+    message: "Building timed voice track"
+  });
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    inputs.push("-i", segment.audioPath);
+    const inputDuration = await probeDuration(segment.audioPath);
+    const targetDuration = Math.max(0.12, segment.end - segment.start);
+    const delayMs = Math.round(segment.start * 1000);
+    const tempo = atempoChain(inputDuration, targetDuration);
+    const perSegment = [
+      "aresample=48000",
+      "asetpts=PTS-STARTPTS",
+      ...tempo,
+      `apad=pad_dur=${targetDuration.toFixed(3)}`,
+      `atrim=0:${targetDuration.toFixed(3)}`,
+      `adelay=${delayMs}:all=1`
+    ];
+    const label = `a${index}`;
+    filters.push(`[${index}:a]${perSegment.join(",")}[${label}]`);
+    labels.push(`[${label}]`);
+  }
+
+  const mixedLabel = "voiceout";
+  if (labels.length === 1) {
+    filters.push(`${labels[0]}loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[${mixedLabel}]`);
+  } else {
+    filters.push(
+      `${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,` +
+        `loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[${mixedLabel}]`
+    );
+  }
+
+  await runFfmpeg(
+    [
+      ...inputs,
+      "-filter_complex",
+      filters.join(";"),
+      "-map",
+      `[${mixedLabel}]`,
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      outputPath
+    ],
+    { step: "align", inputPath: segments[segments.length - 1].audioPath, sendProgress }
+  );
+
+  return {
+    outputPath,
+    segments
+  };
+}
+
 async function runPythonHelper({ projectRoot, scriptName, args, step, sendProgress }) {
   const scriptPath = path.join(projectRoot, "tools", "python", scriptName);
   const pythonCommand = resolvePython(projectRoot);
@@ -345,18 +453,30 @@ async function runPythonHelper({ projectRoot, scriptName, args, step, sendProgre
     });
     return parsed;
   } catch (error) {
+    // Python helpers print {"ok": false, "error": "..."} to stdout then exit non-zero.
+    // Parse it so the UI shows a plain English message instead of raw JSON.
+    let message = error.message;
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed?.error) {
+        message = parsed.error;
+      }
+    } catch {
+      // not JSON; use message as-is
+    }
     sendProgress({
       step,
       state: "error",
       percent: 100,
-      message: error.message
+      message
     });
-    throw new Error(error.message);
+    throw new Error(message);
   }
 }
 
 module.exports = {
   checkTools,
+  composeTimedVoiceTrack,
   createJob,
   extractAudio,
   exportDubbedVideo,
